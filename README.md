@@ -1,9 +1,16 @@
 # randnetpi3 — Randnet dial-up bridge
 
 Lets a Nintendo 64 with a NUS-029 modem cartridge dial up and get online again.
-A Linux box (a Raspberry Pi is the usual choice) stands in for the phone
-network: it answers the console's call, authenticates it over PPP/CHAP, routes
-its traffic, and gives the disk's 1999 browser a way to reach today's web.
+A Linux box (a Raspberry Pi is the usual choice) or a Windows PC stands in for
+the phone network: it answers the console's call, authenticates it over
+PPP/CHAP, routes its traffic, and gives the disk's 1999 browser a way to reach
+today's web.
+
+| Platform | Folder | Guide |
+|---|---|---|
+| Linux (Raspberry Pi, Debian, Ubuntu) | this folder | this README |
+| Windows 7 / 10 / 11 | [`windows/`](windows/README.md) | [Windows](#windows) below |
+| Windows XP | [`windows-xp/`](windows-xp/README.md) | [Windows XP](#windows-xp) below |
 
 This work was based on Luigiblood original randnetpi script (https://64dd.org/pi/)
 
@@ -17,7 +24,7 @@ Three services, each doing one job.
 
 The installer sets up the first two, and the third when asked.
 
-## TL;DR
+## TL;DR (Linux)
 1) On a Linux distro (a RPi, Ubuntu or Debian), connect a USB Modem.
 2) Place all files of this repo in your distro (the `randnet_diskread.n64` is not needed)
 3) Run the following command where the files are located: 
@@ -48,8 +55,13 @@ sudo python3 install_randnetpi3.py --randnet-server dd.randnetdd.ch --with-tls -
 | `set_chap_key.py` | Change the CHAP key after installation |
 | `extract_member.py` | Read the member record, including the CHAP key, out of a `.ndd` disk image |
 | `randnet_diskread.n64` | N64 ROM that shows the CHAP key from a physical Randnet disk |
+| `windows/` | The Windows bridge: no pppd, no admin rights. See [Windows](#windows) |
+| `windows-xp/` | Launcher, config and pyserial 3.0.1 for Windows XP. See [Windows XP](#windows-xp) |
 
 ## Requirements
+
+For Windows, see [Windows](#windows). This section and the ones down to
+[Self-tests](#self-tests) are about the Linux version.
 
 - Linux with Python 3.9 or newer
 - `pppd`, `iptables`, and `dnsmasq` if the name redirect is used
@@ -269,12 +281,115 @@ python3 randnetpi3.py --self-test
 python3 randnet_proxy.py --self-test
 python3 set_chap_key.py --self-test
 python3 install_randnetpi3.py --self-test
+py windows\randnet_win.py --self-test          # Windows
+C:\Python34\python.exe windows-xp\randnet_xp.py --self-test   # Windows XP
 ```
 
 The installer's suite deliberately prints `ERROR:` lines: those are the cases
 that are supposed to be rejected. Only the final summary decides the result.
 
+## Windows
+
+Windows has no pppd, iptables, dnsmasq or stunnel, and its own dial-in server
+only answers a ringing line, which the console never rings. So the Windows
+bridge, `windows/randnet_win.py`, does all of it in one Python process: PPP
+with CHAP, a userspace NAT for the console's connections, the DNS redirect,
+the TLS tunnel, and `randnet_proxy.py` from this folder running in-process.
+It needs no admin rights and no drivers beyond the modem's own.
+
+### What you need
+
+- Python 3.4 or newer, and `pyserial` (`py -m pip install -r windows\requirements.txt`)
+- A modem with a COM port: a USB modem, or a built-in RJ11 softmodem
+- `dial-tone.wav` from [dreampi](https://github.com/Kazade/dreampi). The
+  generated fallback tone did not get a console to dial in testing
+- Either a modem with **voice mode**, which plays the dial tone and hears
+  the console dial, as on Linux, or, for a modem without it, a
+  **telephone line simulator** that provides the dial tone and rings the PC
+  (`answer_mode = ring`; see the Windows XP section)
+
+### Quick start
+
+1. Copy this whole folder to the PC. The bridge loads `randnet_proxy.py`
+   from here.
+2. Put `dial-tone.wav` in `windows\` and set `dial_tone_wav = dial-tone.wav`
+   in `windows\randnet_win.conf`.
+3. From `windows\`:
+   ```
+   py randnet_win.py --list-ports
+   py randnet_win.py --config randnet_win.conf --probe
+   ```
+   `--list-ports` shows which port answers `AT`. `--probe` says whether the
+   modem has voice mode and prints the `voice_sample_mode` and
+   `voice_encoding` lines to use.
+4. In `randnet_win.conf`, set `device` (e.g. `COM3`) if auto-detection
+   picked the wrong port, and `chap_secret` to your disk's key (see
+   [Finding your CHAP key](#finding-your-chap-key)).
+5. Start it with `start_randnet.bat`, wait for `Listening for a call`, then
+   cold boot the console and dial.
+
+`randnet_win.conf` uses the same keys as `randnetpi3.conf` where they mean the
+same thing. The browsing proxy listens on 127.0.0.1 only, so unlike on Linux
+it is not an open proxy on your LAN. Full details, the configuration
+reference and the known differences from Linux are in
+[`windows/README.md`](windows/README.md).
+
+Tested: a Windows 10 PC with a Conexant CX93010 USB modem answered a real N64
+and went through CHAP, IPCP, the TLS tunnel and the browsing proxy.
+
+## Windows XP
+
+For an older PC with a built-in RJ11 modem. XP stops at Python 3.4.4, which
+the Windows bridge supports. `windows-xp/` adds a launcher and a config for
+what XP lacks:
+
+| XP problem | Fix |
+|---|---|
+| pyserial 3.1 and newer fail with `function 'CancelIoEx' not found` | pyserial 3.0.1 ships in `windows-xp/` and is used without installing |
+| XP's root certificates are too old for today's servers | `ca_file = cacert.pem`, a current bundle from [curl.se](https://curl.se/ca/cacert.pem) |
+| XP's browsers cannot download most files any more | download everything on a modern PC |
+
+Download on a modern PC: `python-3.4.4.msi` from
+[python.org](https://www.python.org/downloads/release/python-344/),
+[`cacert.pem`](https://curl.se/ca/cacert.pem) and `dial-tone.wav`. Install
+Python, copy this whole folder over keeping its layout, and put `cacert.pem`
+and `dial-tone.wav` in `windows-xp\`. Check the PC's date and time:
+certificate checks fail on a wrong clock. Then, from `windows-xp\`:
+
+```
+C:\Python34\python.exe randnet_xp.py --list-ports
+C:\Python34\python.exe randnet_xp.py --probe
+start_randnet_xp.bat
+```
+
+### Built-in modems without voice mode
+
+Many laptop softmodems have no voice mode on any available driver. An IBM
+ThinkPad's Agere AC'97 modem on IBM's driver 2.1.20 is one: `AT+FCLASS=8`
+answers `ERROR`. For those, set:
+
+```ini
+[modem]
+answer_mode = ring
+```
+
+The bridge then stays in data mode and answers on `RING`. That needs a
+**telephone line simulator** between the N64 and the PC, one that plays a
+dial tone and rings the other socket when a number is dialled. A plain line
+voltage inducer does neither, and will not work in this mode. To check a
+simulator, plug two ordinary phones into it: lifting one must give a dial
+tone, and dialling must ring the other. This mode has passed the self-tests
+but has not yet answered a real N64.
+
+The alternatives are the USB modem that works on Windows 10, if it has an XP
+driver, or an external serial voice modem, which needs no driver. Details are
+in [`windows-xp/README.md`](windows-xp/README.md).
+
 ## Security notes
+
+These notes are about the Linux bridge. The Windows notes, including the
+risks of running Windows XP, are in [`windows/README.md`](windows/README.md)
+and [`windows-xp/README.md`](windows-xp/README.md).
 
 `randnet_proxy.py` is an **open forwarding proxy**. It has no password and will
 fetch any URL for anyone who can reach its port. It binds all interfaces on
