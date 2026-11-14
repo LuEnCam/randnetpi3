@@ -129,12 +129,9 @@ DEFAULTS = {
         "dial_tone": "yes",
         "dial_tone_wav": "",
         "voice_sample_mode": "1,8000",
-        "voice_encoding": "auto",
         "init_commands": "",
         "flow_control": "none",
         "use_dcd": "yes",
-        "answer_mode": "voice",
-        "answer_rings": "1",
         "answer_delay": "8.0",
         "post_answer_delay": "5.0",
         "reconnect_delay": "5.0",
@@ -845,14 +842,9 @@ def build_modem(cfg, device, args):
     flow = cfg.get("modem", "flow_control").strip().lower()
     if flow not in ("none", "rtscts"):
         raise SystemExit("modem.flow_control must be none or rtscts, got %r" % flow)
-    try:
-        return modem_mod.Modem(
-            device, cfg.getint("modem", "speed"), samples,
-            sample_mode=cfg.get("modem", "voice_sample_mode").strip(),
-            init_commands=init, rtscts=(flow == "rtscts"),
-            encoding=cfg.get("modem", "voice_encoding").strip())
-    except ValueError as exc:
-        raise SystemExit("modem: %s" % exc)
+    return modem_mod.Modem(device, cfg.getint("modem", "speed"), samples,
+                           sample_mode=cfg.get("modem", "voice_sample_mode").strip(),
+                           init_commands=init, rtscts=(flow == "rtscts"))
 
 
 def probe_modem(cfg, args):
@@ -863,27 +855,20 @@ def probe_modem(cfg, args):
     line = build_modem(cfg, device, args)
     line.open()
     print("Modem on %s\n" % device)
-    replies = {}
     try:
         for command in ("ATZ0", "ATE0", "ATI", "ATI3", "AT+GMI", "AT+GMM",
                         "AT+FCLASS=?", "AT+FCLASS=8", "AT+VLS=?", "AT+VSM=?",
                         "AT+FCLASS=0"):
             reply = line.query(command)
-            replies[command] = reply
             print("%-12s %s" % (command, " | ".join(
                 part.strip() for part in reply.splitlines() if part.strip())
                 or "(no answer)"))
     finally:
         line.close()
-    ok, verdict, settings = modem_mod.analyse_probe(replies)
-    print()
-    for text in verdict:
-        print(text)
-    if ok and settings:
-        print("\nPut in [modem]:")
-        for key in ("voice_sample_mode", "voice_encoding"):
-            print("  %s = %s" % (key, settings[key]))
-    return 0 if ok else 1
+    print("\nVoice mode is required. AT+FCLASS=? must list 8, and "
+          "modem.voice_sample_mode must be one of the AT+VSM=? formats: the "
+          "8 bit unsigned linear PCM one at 8000 Hz (often 1, sometimes 128).")
+    return 0
 
 
 def serve(cfg, args, stopper):
@@ -915,14 +900,6 @@ def serve(cfg, args, stopper):
     post_answer_delay = cfg.getfloat("modem", "post_answer_delay")
     reconnect_delay = cfg.getfloat("modem", "reconnect_delay")
     use_dcd = cfg.getboolean("modem", "use_dcd")
-    answer_mode = cfg.get("modem", "answer_mode").strip().lower()
-    if answer_mode not in ("voice", "ring"):
-        raise SystemExit("modem.answer_mode must be voice or ring, got %r"
-                         % answer_mode)
-    answer_rings = max(1, cfg.getint("modem", "answer_rings"))
-    if answer_mode == "ring":
-        logger.info("Answer mode: ring. No dial tone is played here; the line "
-                    "simulator must supply it and ring this modem.")
     line = build_modem(cfg, device, args)
 
     try:
@@ -930,31 +907,27 @@ def serve(cfg, args, stopper):
             try:
                 if not line.is_open:
                     line.open()
-                if answer_mode == "ring":
-                    if not line.wait_for_ring(lambda: stopper.stop, answer_rings):
-                        break
-                else:
-                    line.start_dial_tone()
-                    digit = None
-                    while not stopper.stop and digit is None:
-                        sent = line.pump_dial_tone()
-                        raw = line.read_byte()
-                        if not raw:
-                            if not sent:
-                                time.sleep(0.005)
-                            continue
-                        if raw[0] != modem_mod.DLE:
-                            continue
-                        digit = modem_mod.decode_dtmf(line.read_byte())
-                    if stopper.stop:
-                        break
-                    logger.info("Heard DTMF digit %s, taking the line off dial tone", digit)
-                    line.stop_dial_tone()
-                    deadline = time.monotonic() + answer_delay
-                    while not stopper.stop and time.monotonic() < deadline:
-                        time.sleep(0.1)
-                    if stopper.stop:
-                        break
+                line.start_dial_tone()
+                digit = None
+                while not stopper.stop and digit is None:
+                    sent = line.pump_dial_tone()
+                    raw = line.read_byte()
+                    if not raw:
+                        if not sent:
+                            time.sleep(0.005)
+                        continue
+                    if raw[0] != modem_mod.DLE:
+                        continue
+                    digit = modem_mod.decode_dtmf(line.read_byte())
+                if stopper.stop:
+                    break
+                logger.info("Heard DTMF digit %s, taking the line off dial tone", digit)
+                line.stop_dial_tone()
+                deadline = time.monotonic() + answer_delay
+                while not stopper.stop and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                if stopper.stop:
+                    break
                 line.answer()
                 time.sleep(post_answer_delay)
                 logger.info("Starting PPP; the console will be %s", bridge.peer_ip)

@@ -409,114 +409,6 @@ def test_modem_helpers():
         os.unlink(handle.name)
 
 
-AGERE_PROBE = {
-    # Real --probe output from an Agere SoftModem 2.1.20 on Windows XP.
-    "AT+FCLASS=?": "0,1\r\nOK\r\n",
-    "AT+FCLASS=8": "ERROR\r\n",
-    "AT+VSM=?": '0,"Signed PCM",16,0,8000,(0,122-148),0\r\n'
-                '4,"G.711U",8,0,8000,(0,122-148),0\r\n'
-                '5,"G.711A",8,0,8000,(0,122-148),0\r\n'
-                '132,"IMA ADPCM",4,0,8000,(0,122-148),0\r\nOK\r\n',
-}
-
-
-def test_voice_formats():
-    print("voice formats")
-    check("mu-law of silence", modem_mod.ulaw_byte(0), 0xFF)
-    check("A-law of silence", modem_mod.alaw_byte(0), 0xD5)
-    check("mu-law full scale positive", modem_mod.ulaw_byte(32767), 0x80)
-    check("mu-law full scale negative", modem_mod.ulaw_byte(-32768), 0x00)
-    try:
-        import audioop
-    except ImportError:
-        audioop = None
-    if audioop is not None:
-        linear = struct.pack("<%dh" % 512, *range(-32768, 32768, 128))
-        check("mu-law matches audioop",
-              bytes(bytearray(modem_mod.ulaw_byte(v) for v in
-                              struct.unpack("<512h", linear))),
-              audioop.lin2ulaw(linear, 2))
-        check("A-law matches audioop",
-              bytes(bytearray(modem_mod.alaw_byte(v) for v in
-                              struct.unpack("<512h", linear))),
-              audioop.lin2alaw(linear, 2))
-    check("u8 -> s16le", modem_mod.encode_samples(b"\x80\xff\x00", "s16le"),
-          b"\x00\x00\x00\x7f\x00\x80")
-    check("V.253 id 4 is mu-law", modem_mod.encoding_for("4,8000"), "ulaw")
-    check("id 1 stays 8 bit unsigned", modem_mod.encoding_for("1,8000"), "u8")
-    check("explicit override wins", modem_mod.encoding_for("1,8000", "alaw"), "alaw")
-    pacer = modem_mod.TonePacer(b"\x00" * 4000, clock=lambda: 0.0,
-                                bytes_per_second=16000)
-    check("16 bit audio paced at 16000 bytes/s", pacer._interval, 1000 / 16000.0)
-
-    ok, lines, settings = modem_mod.analyse_probe(AGERE_PROBE)
-    check("Agere without class 8 is rejected", ok, False)
-    check("  and the voice format is still worked out", settings,
-          {"voice_sample_mode": "4,8000", "voice_encoding": "ulaw"})
-    fixed = dict(AGERE_PROBE, **{"AT+FCLASS=?": "0,1,8\r\nOK\r\n",
-                                 "AT+FCLASS=8": "OK\r\n"})
-    check("Agere with class 8 is accepted", modem_mod.analyse_probe(fixed)[0], True)
-    rockwell = {"AT+FCLASS=?": "0,1,1.0,2,8\r\nOK", "AT+FCLASS=8": "OK",
-                "AT+VSM=?": '1,"UNSIGNED PCM",8,0,8000,0,0\r\n'
-                            '129,"IMA ADPCM",4,0,8000,0,0\r\nOK'}
-    check("Rockwell picks 1,8000 unsigned",
-          modem_mod.analyse_probe(rockwell)[2],
-          {"voice_sample_mode": "1,8000", "voice_encoding": "u8"})
-
-
-class ScriptedSerial(object):
-    """A modem that says OK to everything, CONNECT to ATA, and rings when
-    told to."""
-
-    def __init__(self, rings_after=3):
-        self.inbox = bytearray()
-        self.sent = []
-        self.rings_after = rings_after
-        self.rang = False
-
-    @property
-    def in_waiting(self):
-        # Ring only once the commands are answered and read, like a real
-        # call arriving while the bridge waits.
-        if not self.inbox and not self.rang and len(self.sent) >= self.rings_after:
-            self.rang = True
-            self.inbox += b"\r\nRING\r\n\r\nRING\r\n"
-        return len(self.inbox)
-
-    def read(self, count=1):
-        data = bytes(self.inbox[:count])
-        del self.inbox[:count]
-        return data
-
-    def reset_input_buffer(self):
-        del self.inbox[:]
-
-    def write(self, data):
-        command = bytes(data).strip()
-        self.sent.append(command)
-        if command == b"ATA":
-            self.inbox += b"\r\nCONNECT 33600\r\n"
-        else:
-            self.inbox += b"\r\nOK\r\n"
-
-
-def test_ring_mode():
-    print("data-mode answering (answer_mode = ring)")
-    line = modem_mod.Modem("COM3", 57600, b"\x80" * 8000)
-    line.serial = ScriptedSerial(rings_after=4)
-    check("waits for the second ring",
-          line.wait_for_ring(lambda: False, rings=2), True)
-    check("voice mode never requested",
-          any(b"FCLASS=8" in c or b"VTX" in c for c in line.serial.sent), False)
-    check("auto-answer kept off", b"ATS0=0" in line.serial.sent, True)
-    line.answer(timeout=2)
-    check("answered with ATA", line.connect_line, "CONNECT 33600")
-    stopped = modem_mod.Modem("COM3", 57600, b"\x80" * 8000)
-    stopped.serial = ScriptedSerial(rings_after=99)
-    check("stop request ends the wait",
-          stopped.wait_for_ring(lambda: True), False)
-
-
 def test_router():
     print("routing (the iptables rules of randnetpi3.py)")
     cfg = make_cfg(randnet_tls="yes", randnet_tls_host="dd.example.test",
@@ -694,7 +586,7 @@ def test_bad_key():
 def run():
     logging.basicConfig(level=logging.WARNING,
                         format="%(asctime)s %(levelname)-7s %(message)s")
-    for test in (test_framing, test_checksums, test_dns, test_modem_helpers, test_voice_formats, test_ring_mode,
+    for test in (test_framing, test_checksums, test_dns, test_modem_helpers,
                  test_router, test_port_detection, test_session, test_bad_key):
         try:
             test()

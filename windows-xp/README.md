@@ -57,17 +57,13 @@ C:\Python34\python.exe randnet_xp.py --probe
 `--probe` shows whether the modem can do what the bridge needs:
 
 - `AT+FCLASS=?` must include `8` (voice mode).
-- `AT+VSM=?` lists the sample formats. `--probe` picks one and prints the
-  `voice_sample_mode` and `voice_encoding` lines for `randnet_xp.conf`:
-  `1,8000` / `u8` on Conexant/Rockwell (HSF/HCF) chips, `4,8000` / `ulaw` on
-  an Agere SoftModem. (An earlier version said `128,8000` for Agere. That
-  was a guess and is wrong for the Agere 2.1.20 driver.)
+- `AT+VSM=?` lists the sample formats. Set `voice_sample_mode` in
+  `randnet_xp.conf` to the 8-bit unsigned linear PCM one at 8000 Hz: `1,8000`
+  on Conexant/Rockwell (HSF/HCF) chips, often `128,8000` on Agere/LSI.
 
-If `AT+FCLASS=?` has no `8`, or `AT+FCLASS=8` answers `ERROR`, the installed
-driver has voice turned off and the bridge cannot work with it. If the same
-modem still lists formats under `AT+VSM=?`, the voice engine is present: a
-driver build for the same chip with voice/TAM ("answering machine") support
-usually enables it.
+If `AT+FCLASS=?` has no `8`, the installed driver has no voice support. The
+bridge cannot work with it. A voice/TAM driver for the same chip sometimes
+adds it.
 
 Then edit `randnet_xp.conf`: `device` (the modem's COM port, under *Phone and
 Modem Options* > *Modems* > *Properties* > *Advanced*, or from
@@ -80,32 +76,6 @@ start_randnet_xp.bat
 
 Wait for `Listening for a call`, then cold boot the console and dial. The log
 also goes to `randnet_xp.log`.
-
-## A modem without voice mode
-
-Some built-in modems never get voice mode, whatever the driver: an IBM
-ThinkPad's Agere AC'97 modem (`PCI\VEN_8086&DEV_2486&SUBSYS_xxxx1014`) on
-IBM's driver 2.1.20 is one. For those, set in `randnet_xp.conf`:
-
-```ini
-[modem]
-answer_mode = ring
-```
-
-The bridge then stays in data mode and answers when the modem reports
-`RING`. That moves two jobs onto the phone line, so the line needs a
-**telephone line simulator** between the N64 and the PC: a box with two
-phone sockets that plays a dial tone to the caller and rings the other
-socket when a number is dialled. A plain *line voltage inducer* (the usual
-DreamPi part) only supplies voltage. It does neither, and will not work in
-this mode.
-
-Check the simulator's description for both "dial tone" and "ring". To test
-it before the N64, plug two ordinary phones into it: lifting one must give a
-dial tone, and dialling any number must ring the other.
-
-The console is fine with this: it dials, the line rings the PC, the PC
-answers, and the modems connect exactly as they would on a real exchange.
 
 ## Settings specific to this folder
 

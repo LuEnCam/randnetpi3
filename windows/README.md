@@ -64,10 +64,7 @@ voice mode, dial tone, wait for a DTMF digit, `ATA`.
    `AT+FCLASS=?` must include `8`. `AT+VSM=?` lists the sample formats: set
    `voice_sample_mode` to the 8-bit unsigned linear PCM one at 8000 Hz.
    `1,8000` (the default, the same as Linux) suits Conexant/Rockwell chips.
-   `--probe` prints the two lines to put in the config.
-   (An earlier version of this README said Agere chips want `128,8000`. That
-   was a guess; an Agere SoftModem 2.1.20 lists no such format, and takes
-   `4,8000` with `voice_encoding = ulaw`.)
+   Agere/LSI chips often want `128,8000`.
 4. Edit `randnet_win.conf`: set `device` (e.g. `COM3`) if it was not
    auto-detected, and `chap_secret` to your disk's key (see the main README,
    *Finding your CHAP key*).
@@ -97,7 +94,6 @@ trigger *At log on*.
 | `[modem] init_commands` | New. Extra AT commands after every reset, one per line (country code for a softmodem, for instance) |
 | `[modem] flow_control` | New. `none` (as on Linux) or `rtscts` |
 | `[modem] use_dcd` | New. End the session when DCD drops |
-| `[modem] answer_mode`, `answer_rings` | New. `ring` answers in data mode on `RING`, for a modem without voice mode. Needs a telephone line simulator that plays the dial tone and rings the PC; see `../windows-xp/README.md` |
 | `[network] upstream_dns` | New. Forward other queries to this server instead of using Windows' resolver |
 | `[network] ca_file` | New. Extra CA bundle for the tunnel and the proxy, for an out-of-date Windows certificate store |
 | `[proxy]` | New. The browsing proxy's options, which the Linux installer passes on its command line |
